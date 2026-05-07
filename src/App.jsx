@@ -1,122 +1,186 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useMemo, useState } from "react";
+import "./App.css";
+import BlockEditor from "./components/BlockEditor";
+import PageSidebar from "./components/PageSidebar";
+import PreviewPane from "./components/PreviewPane";
 
-function App() {
-  const [count, setCount] = useState(0)
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
 
+const defaultSeed = [
+  {
+    id: crypto.randomUUID(),
+    title: "Introduction to Calculus",
+    blocks: [
+      { id: crypto.randomUUID(), type: "equation", content: "f(x)=x^2" },
+    ],
+  },
+];
+
+export default function App() {
+  const [pages, setPages] = useState([]);
+  const [activePageId, setActivePageId] = useState(null);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [viewRole, setViewRole] = useState("teacher");
+
+  const isTeacher = viewRole === "teacher";
+  const activePage = useMemo(
+    () => pages.find((p) => p.id === activePageId),
+    [pages, activePageId],
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/pages`);
+        if (!res.ok) throw new Error("load failed");
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : data.data || [];
+        const seeded = list.length ? list : defaultSeed;
+        setPages(seeded);
+        setActivePageId(seeded[0].id);
+      } catch {
+        setPages(defaultSeed);
+        setActivePageId(defaultSeed[0].id);
+        setMessage("API unreachable, local seed loaded.");
+      }
+    })();
+  }, []);
+
+  const persist = async (nextPages) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/pages/bulk-upsert`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages: nextPages }),
+      });
+      if (!res.ok) throw new Error();
+      setMessage("Saved to database.");
+    } catch {
+      setMessage("Save failed. Configure Laravel routes/CORS.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updatePages = (fn, autosave = false) => {
+    setPages((prev) => {
+      const next = fn(prev);
+      if (autosave && isTeacher) persist(next);
+      return next;
+    });
+  };
+
+  const addPage = () => {
+    if (!isTeacher) return;
+    const p = {
+      id: crypto.randomUUID(),
+      title: "New Chapter",
+      blocks: [{ id: crypto.randomUUID(), type: "text", content: "" }],
+    };
+    updatePages((prev) => [...prev, p], true);
+    setActivePageId(p.id);
+  };
+
+  const updateActivePage = (nextPage) => {
+    if (!isTeacher) return;
+    updatePages(
+      (prev) => prev.map((p) => (p.id === nextPage.id ? nextPage : p)),
+      true,
+    );
+  };
+
+  if (!activePage) return <div className="editor">Loading...</div>;
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
+    <div className="app-shell">
+      <PageSidebar
+        pages={pages}
+        activePageId={activePageId}
+        onSelectPage={setActivePageId}
+        onAddPage={addPage}
+      />
+      <main className="editor">
+        <header>
+          <div className="tools">
+            {isTeacher &&
+              ["text", "equation", "html", "video", "slide"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() =>
+                    updateActivePage({
+                      ...activePage,
+                      blocks: [
+                        ...activePage.blocks,
+                        { id: crypto.randomUUID(), type: t, content: "" },
+                      ],
+                    })
+                  }
                 >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+                  {t}
+                </button>
+              ))}
+          </div>
+          <div className="role-controls">
+            <select
+              value={viewRole}
+              onChange={(e) => setViewRole(e.target.value)}
+            >
+              <option value="teacher">Teacher View</option>
+              <option value="student">Student View</option>
+            </select>
+            <button onClick={() => setPreviewMode((v) => !v)}>
+              {previewMode ? "Back to edit" : "Preview mode"}
+            </button>
+          </div>
+        </header>
+        <input
+          value={activePage.title}
+          onChange={(e) =>
+            updateActivePage({ ...activePage, title: e.target.value })
+          }
+          className="title"
+          placeholder="Untitled Chapter"
+          disabled={!isTeacher}
+        />
+        <section className="status-row">
+          {isTeacher && (
+            <button disabled={saving} onClick={() => persist(pages)}>
+              {saving ? "Saving..." : "Save to DB"}
+            </button>
+          )}
+          {!isTeacher && <span>Student mode is read-only.</span>}
+          {message && <span>{message}</span>}
+        </section>
+        {previewMode || !isTeacher ? (
+          <PreviewPane blocks={activePage.blocks} />
+        ) : (
+          <section className="blocks">
+            {activePage.blocks.map((block) => (
+              <BlockEditor
+                key={block.id}
+                block={block}
+                onDelete={(id) =>
+                  updateActivePage({
+                    ...activePage,
+                    blocks: activePage.blocks.filter((b) => b.id !== id),
+                  })
+                }
+                onUpdate={(id, content) =>
+                  updateActivePage({
+                    ...activePage,
+                    blocks: activePage.blocks.map((b) =>
+                      b.id === id ? { ...b, content } : b,
+                    ),
+                  })
+                }
+              />
+            ))}
+          </section>
+        )}
+      </main>
+    </div>
+  );
 }
-
-export default App
